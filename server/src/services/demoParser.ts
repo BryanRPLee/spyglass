@@ -12,6 +12,8 @@ import type {
 	GrenadeState,
 	KillEvent,
 	BombEvent,
+	ShotEvent,
+	BlindEvent,
 	RoundEvents
 } from '../types/demo.js'
 
@@ -112,6 +114,21 @@ export function parseDemo(filePath: string): ParsedDemo {
 	const allBombExplosions = parseEvent(filePath, 'bomb_exploded', [
 		'site'
 	]) as any[]
+
+	// weapon_fire doesn't carry the shooter's world position, so — same as
+	// bomb_dropped/planted above — we resolve it from their last known tick
+	// position via positionIndex, built below.
+	const allShots = parseEvent(filePath, 'weapon_fire', [
+		'user_steamid',
+		'user_team_num'
+	]) as any[]
+
+	const allBlinds = parseEvent(
+		filePath,
+		'player_blind',
+		['attacker_steamid', 'attacker_team_num', 'user_steamid', 'user_team_num'],
+		['blind_duration']
+	) as any[]
 
 	const allGrenadeData = parseGrenades(filePath) as any[]
 
@@ -367,7 +384,42 @@ export function parseDemo(filePath: string): ParsedDemo {
 			})
 		}
 
-		const events: RoundEvents = { kills, bombEvents }
+		const shots: ShotEvent[] = []
+		for (const e of allShots.filter(inRound)) {
+			const tick = Number(e.tick)
+			const steamId = String(e.user_steamid ?? '')
+			if (!steamId) continue
+			const pos = positionAt(positionIndex, steamId, tick)
+			shots.push({
+				tick,
+				shooterSteamId: steamId,
+				shooterTeam:
+					steamTeam.get(steamId) ?? toTeam(Number(e.user_team_num ?? 0)),
+				x: pos?.x ?? 0,
+				y: pos?.y ?? 0
+			})
+		}
+
+		const blinds: BlindEvent[] = []
+		for (const e of allBlinds.filter(inRound)) {
+			const victimSteamId = String(e.user_steamid ?? '')
+			const attackerSteamId = String(e.attacker_steamid ?? '')
+			if (!victimSteamId) continue
+			blinds.push({
+				tick: Number(e.tick),
+				victimSteamId,
+				victimTeam:
+					steamTeam.get(victimSteamId) ??
+					toTeam(Number(e.user_team_num ?? 0)),
+				attackerSteamId,
+				attackerTeam:
+					steamTeam.get(attackerSteamId) ??
+					toTeam(Number(e.attacker_team_num ?? 0)),
+				duration: Number(e.blind_duration ?? 0)
+			})
+		}
+
+		const events: RoundEvents = { kills, bombEvents, shots, blinds }
 
 		rounds.push({
 			roundNumber: i + 1,

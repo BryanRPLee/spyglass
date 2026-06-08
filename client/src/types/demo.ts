@@ -81,9 +81,28 @@ export interface BombEvent {
 	y?: number
 }
 
+export interface ShotEvent {
+	tick: number
+	shooterSteamId: string
+	shooterTeam: 'CT' | 'T'
+	x: number
+	y: number
+}
+
+export interface BlindEvent {
+	tick: number
+	victimSteamId: string
+	victimTeam: 'CT' | 'T'
+	attackerSteamId: string
+	attackerTeam: 'CT' | 'T'
+	duration: number // seconds the victim is blinded for
+}
+
 export interface RoundEvents {
 	kills: KillEvent[]
 	bombEvents: BombEvent[]
+	shots: ShotEvent[]
+	blinds: BlindEvent[]
 }
 
 export interface RoundData extends RoundSummary {

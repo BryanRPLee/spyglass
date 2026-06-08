@@ -15,6 +15,14 @@ export interface ControlHazard {
 	kind: 'smoke' | 'molotov'
 }
 
+export interface ControlIntel {
+	gx: number
+	gy: number
+	radius: number
+	perceivingTeam: 'CT' | 'T'
+	confidence: number
+}
+
 const CT_BIT = 1
 const T_BIT = 2
 
@@ -22,7 +30,8 @@ const HAZARD_SMOKE_CT = 1
 const HAZARD_SMOKE_T = 2
 const HAZARD_FIRE = 4
 
-const SMOKE_COST = 3
+const SMOKE_EXTRA = 2
+const CAUTION_MAX_EXTRA = 2
 
 const Z_GATE = 120
 
@@ -86,11 +95,38 @@ function rasterizeHazards(
 	}
 }
 
+function rasterizeIntel(
+	confidenceCT: Float32Array,
+	confidenceT: Float32Array,
+	gridSize: number,
+	intel: ControlIntel[]
+): void {
+	for (const c of intel) {
+		if (c.radius <= 0 || c.confidence <= 0) continue
+		const grid = c.perceivingTeam === 'CT' ? confidenceCT : confidenceT
+		const r2 = c.radius * c.radius
+		const minX = Math.max(0, Math.floor(c.gx - c.radius))
+		const maxX = Math.min(gridSize - 1, Math.ceil(c.gx + c.radius))
+		const minY = Math.max(0, Math.floor(c.gy - c.radius))
+		const maxY = Math.min(gridSize - 1, Math.ceil(c.gy + c.radius))
+		for (let y = minY; y <= maxY; y++) {
+			for (let x = minX; x <= maxX; x++) {
+				const dx = x - c.gx
+				const dy = y - c.gy
+				if (dx * dx + dy * dy > r2) continue
+				const i = y * gridSize + x
+				if (c.confidence > grid[i]) grid[i] = c.confidence
+			}
+		}
+	}
+}
+
 export function computeMapControl(
 	walkable: Uint8Array,
 	gridSize: number,
 	sources: ControlSource[],
-	hazards: ControlHazard[] = []
+	hazards: ControlHazard[] = [],
+	intel: ControlIntel[] = []
 ): Uint8Array {
 	const size = gridSize * gridSize
 	const owner = new Uint8Array(size)
@@ -102,13 +138,24 @@ export function computeMapControl(
 	const hazardMask = new Uint8Array(size)
 	if (hazards.length > 0) rasterizeHazards(hazardMask, gridSize, hazards)
 
-	// Cost for `team` to step into cell `i`. Molotov fire denies the ground to
-	// both sides outright; an enemy smoke just slows the advance (see SMOKE_COST).
+	const intelConfidenceCT = new Float32Array(size)
+	const intelConfidenceT = new Float32Array(size)
+	if (intel.length > 0)
+		rasterizeIntel(intelConfidenceCT, intelConfidenceT, gridSize, intel)
+
 	const stepCost = (i: number, team: 'CT' | 'T'): number => {
 		const mask = hazardMask[i]
 		if (mask & HAZARD_FIRE) return Infinity
+
+		let cost = 1
 		const enemySmoke = team === 'CT' ? HAZARD_SMOKE_T : HAZARD_SMOKE_CT
-		return mask & enemySmoke ? SMOKE_COST : 1
+		if (mask & enemySmoke) cost += SMOKE_EXTRA
+
+		const confidence =
+			team === 'CT' ? intelConfidenceCT[i] : intelConfidenceT[i]
+		if (confidence > 0) cost += Math.round(CAUTION_MAX_EXTRA * confidence)
+
+		return cost
 	}
 
 	const idx = (x: number, y: number) => y * gridSize + x

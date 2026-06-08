@@ -13,9 +13,15 @@ import {
 } from '../../utils/mapControl.js'
 import type {
 	ControlHazard,
+	ControlIntel,
 	ControlOwner,
 	ControlSource
 } from '../../utils/mapControl.js'
+import {
+	buildIntelTimeline,
+	GHOST_INTEL_RADIUS_WORLD
+} from '../../utils/intel.js'
+import type { IntelFrame } from '../../utils/intel.js'
 import type {
 	PlayerState,
 	GrenadeState,
@@ -226,11 +232,33 @@ function drawMapControl(
 		})
 	}
 
+	const intel: ControlIntel[] = []
+	const intelFrame = intelTimeline.get(frame.tick)
+	if (intelFrame) {
+		const intelRadius = GHOST_INTEL_RADIUS_WORLD * worldToGrid
+		for (const [perceivingTeam, ghosts] of [
+			['CT', intelFrame.ct],
+			['T', intelFrame.t]
+		] as const) {
+			for (const ghost of ghosts) {
+				const { x, y } = worldToCanvas(ghost.x, ghost.y, meta, CONTROL_GRID_SIZE)
+				intel.push({
+					gx: Math.floor(x),
+					gy: Math.floor(y),
+					radius: intelRadius,
+					perceivingTeam,
+					confidence: ghost.confidence
+				})
+			}
+		}
+	}
+
 	const owner = computeMapControl(
 		walkabilityGrid,
 		CONTROL_GRID_SIZE,
 		sources,
-		hazards
+		hazards,
+		intel
 	)
 	const cell = mapSize.value / CONTROL_GRID_SIZE
 
@@ -277,6 +305,7 @@ interface GrenadeEpisode {
 // segment each entity's appearances into contiguous tick runs ("episodes")
 // and look up which run covers the tick being rendered.
 let grenadeEpisodes = new Map<number, GrenadeEpisode[]>()
+let intelTimeline = new Map<number, IntelFrame>()
 
 function buildGrenadeEpisodes(
 	frames: TickFrame[]
@@ -389,6 +418,7 @@ watch(
 	() => store.frames,
 	(frames) => {
 		grenadeEpisodes = buildGrenadeEpisodes(frames)
+		intelTimeline = buildIntelTimeline(frames, store.events, store.tickRate)
 	},
 	{ immediate: true }
 )

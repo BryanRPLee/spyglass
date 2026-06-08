@@ -15,7 +15,12 @@ export const usePlaybackStore = defineStore('playback', () => {
 
 	const currentRoundId = ref<string | null>(null)
 	const frames = ref<TickFrame[]>([])
-	const events = ref<RoundEvents>({ kills: [], bombEvents: [] })
+	const events = ref<RoundEvents>({
+		kills: [],
+		bombEvents: [],
+		shots: [],
+		blinds: []
+	})
 
 	const currentFrameIndex = ref(0)
 	const isPlaying = ref(false)
