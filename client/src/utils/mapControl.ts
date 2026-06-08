@@ -34,6 +34,7 @@ const SMOKE_EXTRA = 2
 const CAUTION_MAX_EXTRA = 2
 
 const Z_GATE = 120
+const MAX_CONTROL_DIST = 32
 
 const NEIGHBORS: ReadonlyArray<readonly [number, number]> = [
 	[-1, -1],
@@ -65,8 +66,7 @@ export function buildWalkabilityGrid(
 	return grid
 }
 
-// Stamps each hazard's circular footprint into a per-cell bitmask so the
-// flood-fill can look up "what's burning/smoked here" in O(1) per step.
+// Stamps each hazard's circular footprint into a per-cell bitmask so the flood-fill can look up "what's burning/smoked here" in O(1) per step.
 function rasterizeHazards(
 	mask: Uint8Array,
 	gridSize: number,
@@ -167,8 +167,6 @@ export function computeMapControl(
 		claimZ[i * 2 + (team === 'CT' ? 0 : 1)] = z
 	}
 
-	// Resolves a cell's claim(s) into a final owner, gating contested status by
-	// how close the two waves' carried z values are (see Z_GATE comment above).
 	const settle = (i: number): ControlOwner => {
 		const mask = claimMask[i]
 		let o: ControlOwner
@@ -205,7 +203,7 @@ export function computeMapControl(
 		enqueue(0, [i, s.team, s.z])
 	}
 
-	for (let d = 0; d < buckets.length; d++) {
+	for (let d = 0; d <= MAX_CONTROL_DIST && d < buckets.length; d++) {
 		const batch = buckets[d]
 		if (!batch) continue
 

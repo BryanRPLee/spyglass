@@ -165,6 +165,7 @@ let mapMeta: MapMeta | null = null
 // The walkability grid is derived from the radar PNG's alpha channel, so it's
 // rebuilt only when the map image (re)loads, not every frame.
 const showMapControl = ref(false)
+const useSoundCues = ref(true)
 const CONTROL_GRID_SIZE = 96
 let walkabilityGrid: Uint8Array | null = null
 
@@ -173,7 +174,13 @@ function toggleMapControl() {
 	drawAt(store.playbackProgress)
 }
 
-const CONTROL_COLORS: Record<Exclude<ControlOwner, 0>, string> = {
+function toggleSoundCues() {
+	useSoundCues.value = !useSoundCues.value
+	drawAt(store.playbackProgress)
+}
+
+const CONTROL_COLORS: Record<ControlOwner, string> = {
+	0: 'rgba(158, 158, 158, 0.12)', // neutral / uncontrolled
 	1: 'rgba(33, 150, 243, 0.22)', // CT
 	2: 'rgba(255, 109, 0, 0.22)', // T
 	3: 'rgba(255, 255, 255, 0.08)' // contested
@@ -233,7 +240,7 @@ function drawMapControl(
 	}
 
 	const intel: ControlIntel[] = []
-	const intelFrame = intelTimeline.get(frame.tick)
+	const intelFrame = useSoundCues.value ? intelTimeline.get(frame.tick) : null
 	if (intelFrame) {
 		const intelRadius = GHOST_INTEL_RADIUS_WORLD * worldToGrid
 		for (const [perceivingTeam, ghosts] of [
@@ -265,7 +272,7 @@ function drawMapControl(
 	for (let gy = 0; gy < CONTROL_GRID_SIZE; gy++) {
 		for (let gx = 0; gx < CONTROL_GRID_SIZE; gx++) {
 			const o = owner[gy * CONTROL_GRID_SIZE + gx]
-			if (o === 0) continue
+			if (!walkabilityGrid[gy * CONTROL_GRID_SIZE + gx]) continue
 			ctx.fillStyle = CONTROL_COLORS[o]
 			ctx.fillRect(gx * cell, gy * cell, cell + 0.5, cell + 0.5)
 		}
@@ -833,6 +840,13 @@ function drawGrenade(
 				variant="flat"
 				:color="showMapControl ? 'primary' : 'rgba(0,0,0,0.5)'"
 				@click="toggleMapControl"
+			/>
+			<v-btn
+				icon="mdi-ear-hearing"
+				size="x-small"
+				variant="flat"
+				:color="useSoundCues ? 'primary' : 'rgba(0,0,0,0.5)'"
+				@click="toggleSoundCues"
 			/>
 		</div>
 
