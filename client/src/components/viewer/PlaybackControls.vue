@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { usePlaybackStore } from '../../stores/playbackStore.js'
+import RoundEventTimeline from './RoundEventTimeline.vue'
 
 const store = usePlaybackStore()
 
@@ -40,6 +41,8 @@ const duration = computed(() => {
 
 <template>
 	<div class="playback-controls pa-3">
+		<RoundEventTimeline />
+
 		<!-- Scrubber -->
 		<v-slider
 			v-model="progress"

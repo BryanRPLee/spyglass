@@ -1,15 +1,135 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { usePlaybackStore } from '../../stores/playbackStore.js'
 import { MAP_DATA, worldToCanvas, yawToDirection } from '../../data/maps.js'
 import { ICON_SHEET, ICON_SHEET_SIZE, WEAPON_ICON_RECTS } from '../../data/weaponIcons.js'
 import type { PlayerState, GrenadeState, BombEvent, TickFrame } from '../../types/demo.js'
 import type { MapMeta } from '../../data/maps.js'
 
-const CANVAS_SIZE = 680
-
 const store = usePlaybackStore()
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+const wrapRef = ref<HTMLDivElement | null>(null)
+
+// Canvas tracks its container's actual rect (no more fixed square +
+// object-fit letterboxing). The square radar is drawn to *fit* that rect at
+// 1x — full map in frame on load, letterbox bars baked into the canvas fill
+// itself (not CSS dead space) — and because the view transform scales the
+// whole rect (bars included) around its center, zooming in naturally expands
+// the map to cover the entire box instead of clipping at an inscribed square.
+const viewSize = ref({ w: 680, h: 680 })
+const mapSize = computed(() => Math.min(viewSize.value.w, viewSize.value.h))
+const mapOffset = computed(() => ({
+	x: (viewSize.value.w - mapSize.value) / 2,
+	y: (viewSize.value.h - mapSize.value) / 2
+}))
+
+let resizeObserver: ResizeObserver | null = null
+function syncViewSize() {
+	const rect = wrapRef.value?.getBoundingClientRect()
+	if (!rect || rect.width === 0 || rect.height === 0) return
+	const w = Math.round(rect.width)
+	const h = Math.round(rect.height)
+	if (w === viewSize.value.w && h === viewSize.value.h) return
+	viewSize.value = { w, h }
+}
+
+// Zoom/pan are applied as a canvas transform *before* drawing — text, sprites
+// and shapes get rasterized at the zoomed scale directly onto the backing
+// pixel grid, so they stay crisp. (A CSS transform would instead stretch the
+// already-rasterized 1x output, pixelating icons and labels when zoomed in.)
+const MIN_ZOOM = 1
+const MAX_ZOOM = 4
+const ZOOM_STEP = 0.25
+
+const zoom = ref(1)
+const pan = ref({ x: 0, y: 0 })
+const isPanning = ref(false)
+
+const canvasCursor = computed(() =>
+	zoom.value > MIN_ZOOM ? (isPanning.value ? 'grabbing' : 'grab') : 'default'
+)
+
+function maxPanOffset(): number {
+	return (mapSize.value * (zoom.value - 1)) / 2
+}
+
+function clampPan(p: { x: number; y: number }): { x: number; y: number } {
+	const m = maxPanOffset()
+	return { x: Math.min(m, Math.max(-m, p.x)), y: Math.min(m, Math.max(-m, p.y)) }
+}
+
+// Centers the scale on the canvas midpoint, then offsets by `pan` (in canvas
+// pixels) so dragging tracks the cursor 1:1 regardless of zoom level.
+function applyViewTransform(ctx: CanvasRenderingContext2D) {
+	const cx = viewSize.value.w / 2
+	const cy = viewSize.value.h / 2
+	ctx.translate(pan.value.x, pan.value.y)
+	ctx.translate(cx, cy)
+	ctx.scale(zoom.value, zoom.value)
+	ctx.translate(-cx, -cy)
+}
+
+function clampZoom(z: number): number {
+	return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z))
+}
+
+function zoomBy(delta: number) {
+	const next = clampZoom(zoom.value + delta)
+	zoom.value = next
+	pan.value = next === MIN_ZOOM ? { x: 0, y: 0 } : clampPan(pan.value)
+}
+
+function onWheel(e: WheelEvent) {
+	e.preventDefault()
+	zoomBy(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP)
+}
+
+function resetView() {
+	zoom.value = 1
+	pan.value = { x: 0, y: 0 }
+}
+
+// Mouse deltas arrive in screen pixels; the canvas's CSS size should match
+// viewSize 1:1, but compute the ratio defensively so a drag still tracks the
+// cursor exactly if a layout reflow lands between resize and redraw.
+function canvasDisplayScale(): number {
+	const rect = canvasRef.value?.getBoundingClientRect()
+	return rect && rect.width > 0 ? rect.width / viewSize.value.w : 1
+}
+
+let panPointerStart = { x: 0, y: 0 }
+let panOrigin = { x: 0, y: 0 }
+let panDisplayScale = 1
+
+function onPanStart(e: MouseEvent) {
+	if (zoom.value <= MIN_ZOOM) return
+	isPanning.value = true
+	panPointerStart = { x: e.clientX, y: e.clientY }
+	panOrigin = { ...pan.value }
+	panDisplayScale = canvasDisplayScale()
+	window.addEventListener('mousemove', onPanMove)
+	window.addEventListener('mouseup', onPanEnd)
+}
+
+function onPanMove(e: MouseEvent) {
+	if (!isPanning.value) return
+	pan.value = clampPan({
+		x: panOrigin.x + (e.clientX - panPointerStart.x) / panDisplayScale,
+		y: panOrigin.y + (e.clientY - panPointerStart.y) / panDisplayScale
+	})
+}
+
+function onPanEnd() {
+	isPanning.value = false
+	window.removeEventListener('mousemove', onPanMove)
+	window.removeEventListener('mouseup', onPanEnd)
+}
+
+onBeforeUnmount(() => {
+	window.removeEventListener('mousemove', onPanMove)
+	window.removeEventListener('mouseup', onPanEnd)
+	resizeObserver?.disconnect()
+})
 
 let mapImage: HTMLImageElement | null = null
 let mapMeta: MapMeta | null = null
@@ -104,8 +224,8 @@ function setupCanvas() {
 	if (!canvas || !ctx) return null
 
 	const dpr = window.devicePixelRatio || 1
-	canvas.width = CANVAS_SIZE * dpr
-	canvas.height = CANVAS_SIZE * dpr
+	canvas.width = viewSize.value.w * dpr
+	canvas.height = viewSize.value.h * dpr
 	ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 	return ctx
 }
@@ -134,6 +254,19 @@ watch(
 	(progress) => drawAt(progress)
 )
 
+// Zoom/pan only move the view — they don't touch playbackProgress, so without
+// this the canvas sits frozen on its last frame until playback ticks again
+// (paused) or the next zoom happens to land on a frame that does redraw.
+watch([zoom, pan], () => drawAt(store.playbackProgress), { deep: true })
+
+// Container resized (window resize, sidebar toggle, etc.) — resize the
+// backing buffer to match and redraw, otherwise the canvas keeps its old
+// pixel dimensions while CSS stretches it, blurring everything.
+watch(viewSize, () => {
+	setupCanvas()
+	drawAt(store.playbackProgress)
+})
+
 watch(
 	() => store.frames,
 	(frames) => {
@@ -143,8 +276,14 @@ watch(
 )
 
 onMounted(() => {
+	syncViewSize()
 	setupCanvas()
 	drawAt(store.playbackProgress)
+
+	if (wrapRef.value) {
+		resizeObserver = new ResizeObserver(syncViewSize)
+		resizeObserver.observe(wrapRef.value)
+	}
 })
 
 // Smoothly blend angle a -> b across the shorter arc (handles the 360°/0° wrap).
@@ -199,30 +338,42 @@ function draw(
 	ctx: CanvasRenderingContext2D,
 	frame: { tick: number; players: PlayerState[]; grenades: GrenadeState[] }
 ) {
-	ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE)
+	const { w, h } = viewSize.value
+	const size = mapSize.value
+
+	// Clear in the untransformed (DPR-only) space first so the whole physical
+	// canvas wipes regardless of the current zoom/pan — then apply the view
+	// transform, plus the cover offset that centers the square radar texture
+	// inside a non-square viewport, around everything that scales/pans together.
+	ctx.clearRect(0, 0, w, h)
+	ctx.save()
+	applyViewTransform(ctx)
+	ctx.translate(mapOffset.value.x, mapOffset.value.y)
 
 	if (mapImage) {
-		ctx.drawImage(mapImage, 0, 0, CANVAS_SIZE, CANVAS_SIZE)
+		ctx.drawImage(mapImage, 0, 0, size, size)
 	} else {
 		ctx.fillStyle = '#1a1a2e'
-		ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE)
+		ctx.fillRect(0, 0, size, size)
 		ctx.fillStyle = 'rgba(255,255,255,0.08)'
 		ctx.font = '14px monospace'
 		ctx.textAlign = 'center'
 		ctx.fillText(
 			`No radar for "${store.mapName}" — place PNG in /public/maps/`,
-			CANVAS_SIZE / 2,
-			CANVAS_SIZE / 2
+			size / 2,
+			size / 2
 		)
 	}
 
-	if (!mapMeta) return
+	if (mapMeta) {
+		for (const g of frame.grenades) drawGrenade(ctx, g, mapMeta, frame.tick)
 
-	for (const g of frame.grenades) drawGrenade(ctx, g, mapMeta, frame.tick)
+		for (const p of frame.players) drawPlayer(ctx, p, mapMeta)
 
-	for (const p of frame.players) drawPlayer(ctx, p, mapMeta)
+		drawBombState(ctx, frame, mapMeta)
+	}
 
-	drawBombState(ctx, frame, mapMeta)
+	ctx.restore()
 }
 
 // Bomb position isn't sampled per-frame — it's reconstructed from the round's
@@ -268,7 +419,7 @@ function drawBombIcon(
 	tick: number,
 	opts: { planted: boolean; site?: string }
 ) {
-	const { x, y } = worldToCanvas(worldX, worldY, meta, CANVAS_SIZE)
+	const { x, y } = worldToCanvas(worldX, worldY, meta, mapSize.value)
 	const rect = WEAPON_ICON_RECTS.c4
 	const H = 16
 	const scale = H / rect.h
@@ -315,7 +466,7 @@ function drawPlayer(
 	p: PlayerState,
 	meta: MapMeta
 ) {
-	const { x, y } = worldToCanvas(p.x, p.y, meta, CANVAS_SIZE)
+	const { x, y } = worldToCanvas(p.x, p.y, meta, mapSize.value)
 	const isCT = p.team === 'CT'
 
 	const FILL = isCT ? '#1565c0' : '#bf360c'
@@ -373,6 +524,26 @@ function drawPlayer(
 		ctx.arc(x + R + 2, y - R - 2, 3, 0, Math.PI * 2)
 		ctx.fill()
 	}
+
+	if (p.isDefusing) drawDefuseIcon(ctx, x, y)
+}
+
+// Defuse kit icon laid directly over the player's dot — the clearest spot to
+// catch mid-defuse at a glance, since it's exactly where your eye already is.
+function drawDefuseIcon(ctx: CanvasRenderingContext2D, x: number, y: number) {
+	const rect = WEAPON_ICON_RECTS.defuseKit
+	const H = 14
+	const scale = H / rect.h
+	const w = rect.w * scale
+
+	ctx.beginPath()
+	ctx.arc(x, y, H * 0.65, 0, Math.PI * 2)
+	ctx.fillStyle = 'rgba(0,0,0,0.55)'
+	ctx.fill()
+
+	if (bombIcon) {
+		ctx.drawImage(bombIcon, rect.x, rect.y, rect.w, rect.h, x - w / 2, y - H / 2, w, H)
+	}
 }
 const GRENADE_COLORS: Record<
 	GrenadeState['type'],
@@ -401,13 +572,13 @@ function drawGrenade(
 		if (elapsed >= duration) return
 	}
 
-	const { x, y } = worldToCanvas(g.x, g.y, meta, CANVAS_SIZE)
+	const { x, y } = worldToCanvas(g.x, g.y, meta, mapSize.value)
 	const { fill, stroke, spread } = GRENADE_COLORS[g.type]
 	const R = g.type === 'smoke' ? 5 : 4
 
 	const spreadWorld = GRENADE_SPREAD_WORLD[g.type]
 	if (spreadWorld) {
-		const edge = worldToCanvas(g.x + spreadWorld, g.y, meta, CANVAS_SIZE)
+		const edge = worldToCanvas(g.x + spreadWorld, g.y, meta, mapSize.value)
 		const spreadR = Math.abs(edge.x - x)
 		ctx.beginPath()
 		ctx.arc(x, y, spreadR, 0, Math.PI * 2)
@@ -450,16 +621,68 @@ function drawGrenade(
 }
 </script>
 <template>
-	<canvas ref="canvasRef" class="map-canvas" />
+	<div ref="wrapRef" class="map-canvas-wrap" @wheel="onWheel" @mousedown="onPanStart">
+		<canvas ref="canvasRef" class="map-canvas" :style="{ cursor: canvasCursor }" />
+
+		<div class="zoom-controls d-flex flex-column align-center">
+			<v-btn
+				icon="mdi-plus"
+				size="x-small"
+				variant="flat"
+				color="rgba(0,0,0,0.5)"
+				@click="zoomBy(ZOOM_STEP)"
+			/>
+			<span class="zoom-level text-caption">{{ Math.round(zoom * 100) }}%</span>
+			<v-btn
+				icon="mdi-minus"
+				size="x-small"
+				variant="flat"
+				color="rgba(0,0,0,0.5)"
+				@click="zoomBy(-ZOOM_STEP)"
+			/>
+			<v-btn
+				icon="mdi-restore"
+				size="x-small"
+				variant="flat"
+				color="rgba(0,0,0,0.5)"
+				class="mt-1"
+				@click="resetView"
+			/>
+		</div>
+	</div>
 </template>
 <style scoped>
-.map-canvas {
-	/* Canvas carries its own intrinsic square size (CANVAS_SIZE attr) — let
-	   object-fit scale it to fit the available box without stretching it
-	   into a non-square shape when the viewport forces a tighter fit. */
+.map-canvas-wrap {
+	position: relative;
 	width: 100%;
 	height: 100%;
-	object-fit: contain;
+	overflow: hidden;
 	border-radius: 4px;
+}
+.map-canvas {
+	/* Backing buffer is sized to match the wrapper exactly (see syncViewSize) —
+	   the square radar texture is drawn to *cover* this rect (mapSize/mapOffset),
+	   so the whole box is map, not letterboxed into an inscribed square. Zoom/pan
+	   are baked into the draw loop itself (see applyViewTransform) so icons/text
+	   stay crisp instead of being CSS-stretched after rasterizing. */
+	display: block;
+	width: 100%;
+	height: 100%;
+	border-radius: 4px;
+}
+.zoom-controls {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	gap: 2px;
+	background: rgba(0, 0, 0, 0.35);
+	border-radius: 8px;
+	padding: 4px;
+}
+.zoom-level {
+	color: rgba(255, 255, 255, 0.85);
+	font-variant-numeric: tabular-nums;
+	min-width: 34px;
+	text-align: center;
 }
 </style>

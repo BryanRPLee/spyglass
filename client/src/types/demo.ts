@@ -34,6 +34,7 @@ export interface PlayerState {
 	hasBomb: boolean
 	hasHelmet: boolean
 	hasDefuseKit: boolean
+	isDefusing: boolean
 	activeWeapon: string
 	inventory: string[]
 	kills: number

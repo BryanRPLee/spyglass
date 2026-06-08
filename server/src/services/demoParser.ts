@@ -122,6 +122,7 @@ export function parseDemo(filePath: string): ParsedDemo {
 		'has_c4',
 		'has_helmet',
 		'has_defuser',
+		'is_defusing',
 		'inventory',
 		'kills_total',
 		'deaths_total',
@@ -152,6 +153,7 @@ export function parseDemo(filePath: string): ParsedDemo {
 			hasBomb: Boolean(row.has_c4),
 			hasHelmet: Boolean(row.has_helmet),
 			hasDefuseKit: Boolean(row.has_defuser),
+			isDefusing: Boolean(row.is_defusing),
 			activeWeapon: String(row.active_weapon_name ?? ''),
 			inventory: Array.isArray(row.inventory)
 				? row.inventory.map((w: unknown) => String(w))
