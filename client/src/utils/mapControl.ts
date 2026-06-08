@@ -7,16 +7,23 @@ export interface ControlSource {
 	team: 'CT' | 'T'
 }
 
+export interface ControlHazard {
+	gx: number
+	gy: number
+	radius: number
+	team: 'CT' | 'T'
+	kind: 'smoke' | 'molotov'
+}
+
 const CT_BIT = 1
 const T_BIT = 2
 
-// The radar is a flat top-down projection, so a player on a catwalk and one
-// directly below it land in the same cell — without nav-mesh data we can't
-// know a cell is actually two stacked floors. Z height is the next best signal:
-// two opposing waves meeting with a small z gap are genuinely fighting over the
-// same ground (contested); a gap wider than a typical Source-engine floor means
-// they're probably on different levels, so the lower one (the "real" floor
-// beneath the catwalk) wins instead of painting a false standoff.
+const HAZARD_SMOKE_CT = 1
+const HAZARD_SMOKE_T = 2
+const HAZARD_FIRE = 4
+
+const SMOKE_COST = 3
+
 const Z_GATE = 120
 
 const NEIGHBORS: ReadonlyArray<readonly [number, number]> = [
@@ -49,10 +56,41 @@ export function buildWalkabilityGrid(
 	return grid
 }
 
+// Stamps each hazard's circular footprint into a per-cell bitmask so the
+// flood-fill can look up "what's burning/smoked here" in O(1) per step.
+function rasterizeHazards(
+	mask: Uint8Array,
+	gridSize: number,
+	hazards: ControlHazard[]
+): void {
+	for (const h of hazards) {
+		if (h.radius <= 0) continue
+		const bit =
+			h.kind === 'molotov'
+				? HAZARD_FIRE
+				: h.team === 'CT'
+					? HAZARD_SMOKE_CT
+					: HAZARD_SMOKE_T
+		const r2 = h.radius * h.radius
+		const minX = Math.max(0, Math.floor(h.gx - h.radius))
+		const maxX = Math.min(gridSize - 1, Math.ceil(h.gx + h.radius))
+		const minY = Math.max(0, Math.floor(h.gy - h.radius))
+		const maxY = Math.min(gridSize - 1, Math.ceil(h.gy + h.radius))
+		for (let y = minY; y <= maxY; y++) {
+			for (let x = minX; x <= maxX; x++) {
+				const dx = x - h.gx
+				const dy = y - h.gy
+				if (dx * dx + dy * dy <= r2) mask[y * gridSize + x] |= bit
+			}
+		}
+	}
+}
+
 export function computeMapControl(
 	walkable: Uint8Array,
 	gridSize: number,
-	sources: ControlSource[]
+	sources: ControlSource[],
+	hazards: ControlHazard[] = []
 ): Uint8Array {
 	const size = gridSize * gridSize
 	const owner = new Uint8Array(size)
@@ -60,6 +98,18 @@ export function computeMapControl(
 	const visited = new Uint8Array(size)
 	const claimMask = new Uint8Array(size)
 	const claimZ = new Float32Array(size * 2) // [ctZ, tZ] per cell — only meaningful while the matching claimMask bit is set
+
+	const hazardMask = new Uint8Array(size)
+	if (hazards.length > 0) rasterizeHazards(hazardMask, gridSize, hazards)
+
+	// Cost for `team` to step into cell `i`. Molotov fire denies the ground to
+	// both sides outright; an enemy smoke just slows the advance (see SMOKE_COST).
+	const stepCost = (i: number, team: 'CT' | 'T'): number => {
+		const mask = hazardMask[i]
+		if (mask & HAZARD_FIRE) return Infinity
+		const enemySmoke = team === 'CT' ? HAZARD_SMOKE_T : HAZARD_SMOKE_CT
+		return mask & enemySmoke ? SMOKE_COST : 1
+	}
 
 	const idx = (x: number, y: number) => y * gridSize + x
 	const inBounds = (x: number, y: number) =>
@@ -95,23 +145,32 @@ export function computeMapControl(
 		return o
 	}
 
-	let frontier: number[] = []
-	let touched: number[] = []
+	type QueueEntry = readonly [cell: number, team: 'CT' | 'T', z: number]
+	const buckets: QueueEntry[][] = []
+	const enqueue = (dist: number, entry: QueueEntry) => {
+		;(buckets[dist] ??= []).push(entry)
+	}
 
 	for (const s of sources) {
 		if (!inBounds(s.gx, s.gy)) continue
 		const i = idx(s.gx, s.gy)
 		if (!walkable[i]) continue
-		if (claimMask[i] === 0) touched.push(i)
-		claim(i, s.team, s.z)
+		enqueue(0, [i, s.team, s.z])
 	}
-	for (const i of touched) {
-		if (settle(i) !== 3) frontier.push(i)
-	}
-	touched = []
 
-	while (frontier.length > 0) {
-		for (const i of frontier) {
+	for (let d = 0; d < buckets.length; d++) {
+		const batch = buckets[d]
+		if (!batch) continue
+
+		const touched: number[] = []
+		for (const [i, team, z] of batch) {
+			if (visited[i]) continue
+			if (claimMask[i] === 0) touched.push(i)
+			claim(i, team, z)
+		}
+
+		for (const i of touched) {
+			if (settle(i) === 3) continue
 			const team: 'CT' | 'T' = owner[i] === 1 ? 'CT' : 'T'
 			const z = ownerZ[i]
 			const x = i % gridSize
@@ -122,16 +181,11 @@ export function computeMapControl(
 				if (!inBounds(nx, ny)) continue
 				const ni = idx(nx, ny)
 				if (visited[ni] || !walkable[ni]) continue
-				if (claimMask[ni] === 0) touched.push(ni)
-				claim(ni, team, z)
+				const cost = stepCost(ni, team)
+				if (!Number.isFinite(cost)) continue
+				enqueue(d + cost, [ni, team, z])
 			}
 		}
-
-		frontier = []
-		for (const i of touched) {
-			if (settle(i) !== 3) frontier.push(i)
-		}
-		touched = []
 	}
 
 	return owner

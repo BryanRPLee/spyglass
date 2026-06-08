@@ -11,7 +11,11 @@ import {
 	buildWalkabilityGrid,
 	computeMapControl
 } from '../../utils/mapControl.js'
-import type { ControlOwner, ControlSource } from '../../utils/mapControl.js'
+import type {
+	ControlHazard,
+	ControlOwner,
+	ControlSource
+} from '../../utils/mapControl.js'
 import type {
 	PlayerState,
 	GrenadeState,
@@ -171,7 +175,7 @@ const CONTROL_COLORS: Record<Exclude<ControlOwner, 0>, string> = {
 
 function drawMapControl(
 	ctx: CanvasRenderingContext2D,
-	frame: { players: PlayerState[] },
+	frame: { tick: number; players: PlayerState[]; grenades: GrenadeState[] },
 	meta: MapMeta
 ) {
 	if (!walkabilityGrid) return
@@ -197,7 +201,37 @@ function drawMapControl(
 	}
 	if (sources.length === 0) return
 
-	const owner = computeMapControl(walkabilityGrid, CONTROL_GRID_SIZE, sources)
+	// Fold currently-active smokes/molotovs into the flood-fill as hazards —
+	// same "is it still burning/deployed" check drawGrenade uses for its
+	// countdown ring, just reused here to gate which ones affect control.
+	const hazards: ControlHazard[] = []
+	const worldToGrid = CONTROL_GRID_SIZE / (meta.scale * meta.radarSize)
+	for (const g of frame.grenades) {
+		if (g.type !== 'smoke' && g.type !== 'molotov') continue
+		const spreadWorld = GRENADE_SPREAD_WORLD[g.type]
+		if (!spreadWorld) continue
+		const duration = GRENADE_DURATIONS[g.type]
+		const episode = findGrenadeEpisode(g.entityId, g.type, frame.tick)
+		if (duration && episode) {
+			const elapsed = (frame.tick - episode.start) / store.tickRate
+			if (elapsed >= duration) continue
+		}
+		const { x, y } = worldToCanvas(g.x, g.y, meta, CONTROL_GRID_SIZE)
+		hazards.push({
+			gx: Math.floor(x),
+			gy: Math.floor(y),
+			radius: spreadWorld * worldToGrid,
+			team: g.team,
+			kind: g.type
+		})
+	}
+
+	const owner = computeMapControl(
+		walkabilityGrid,
+		CONTROL_GRID_SIZE,
+		sources,
+		hazards
+	)
 	const cell = mapSize.value / CONTROL_GRID_SIZE
 
 	for (let gy = 0; gy < CONTROL_GRID_SIZE; gy++) {
