@@ -1,0 +1,47 @@
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "sqlite"
+}
+
+model User {
+    id        String   @id // Clerk user ID
+    email     String   @unique
+    demos     Demo[]
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+}
+
+model Demo {
+    id         String    @id @default(cuid())
+    userId     String
+    user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+    filename   String
+    mapName    String    @default("")
+    tickRate   Int       @default(64)
+    status     String    @default("PENDING") // PENDING | PARSING | READY | ERROR
+    errorMsg   String?
+    uploadedAt DateTime  @default(now())
+    parsedAt   DateTime?
+    rounds     Round[]
+
+    @@index([userId])
+}
+
+model Round {
+    id          String  @id @default(cuid())
+    demoId      String
+    demo        Demo    @relation(fields: [demoId], references: [id], onDelete: Cascade)
+    roundNumber Int
+    startTick   Int
+    endTick     Int
+    winnerTeam  String? // "CT" | "T"
+    winReason   String?
+    framesData  String // JSON: TickFrame[]
+    eventsData  String // JSON: RoundEvents
+
+    @@index([demoId])
+    @@index([demoId, roundNumber])
+}
