@@ -4,6 +4,7 @@ export interface PlayerState {
 	team: 'CT' | 'T'
 	x: number
 	y: number
+	z: number
 	yaw: number
 	hp: number
 	armor: number

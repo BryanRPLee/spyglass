@@ -66,7 +66,10 @@ export type WeaponIconKey = keyof typeof WEAPON_ICON_RECTS
 
 // Normalizes every sprite to the same on-screen height so wildly different
 // silhouette aspect ratios (long rifles vs. squat grenades) sit on one baseline.
-export function spriteStyle(key: WeaponIconKey | null | undefined, heightPx: number) {
+export function spriteStyle(
+	key: WeaponIconKey | null | undefined,
+	heightPx: number
+) {
 	if (!key) return null
 	const r = WEAPON_ICON_RECTS[key]
 	const scale = heightPx / r.h
@@ -112,47 +115,47 @@ const GRENADE_ICON_KEYS: ReadonlySet<WeaponIconKey> = new Set([
 const NAME_TO_ICON: Record<string, WeaponIconKey> = {
 	'Desert Eagle': 'pistol_deagle',
 	'Dual Berettas': 'pistol_elite',
-	'P2000': 'pistol_p2000',
+	P2000: 'pistol_p2000',
 	'Glock-18': 'pistol_glock',
 	'Tec-9': 'pistol_tec9',
-	'P250': 'pistol_p250',
+	P250: 'pistol_p250',
 	'Five-SeveN': 'pistol_fiveseven',
 	'USP-S': 'pistol_usp',
 	'CZ75-Auto': 'pistol_cz75',
 	'R8 Revolver': 'pistol_revolver',
 
 	'MAC-10': 'smg_mac10',
-	'MP9': 'smg_mp9',
-	'P90': 'smg_p90',
+	MP9: 'smg_mp9',
+	P90: 'smg_p90',
 	'MP5-SD': 'smg_mp5',
-	'MP7': 'smg_compact',
+	MP7: 'smg_compact',
 	'UMP-45': 'smg_compact',
 
 	'AK-47': 'rifle_ak47',
-	'M4A4': 'rifle_m4a4',
+	M4A4: 'rifle_m4a4',
 	'M4A1-S': 'rifle_m4a1s',
-	'FAMAS': 'rifle_famas',
+	FAMAS: 'rifle_famas',
 	'Galil AR': 'rifle_galil',
-	'AUG': 'rifle_aug',
+	AUG: 'rifle_aug',
 	'SG 553': 'rifle_sg553',
 
-	'AWP': 'sniper_awp',
+	AWP: 'sniper_awp',
 	'SSG 08': 'sniper_ssg08',
-	'G3SG1': 'sniper_g3sg1',
+	G3SG1: 'sniper_g3sg1',
 	'SCAR-20': 'sniper_scar20',
 
-	'Nova': 'shotgun_nova',
-	'XM1014': 'shotgun_xm1014',
+	Nova: 'shotgun_nova',
+	XM1014: 'shotgun_xm1014',
 	'MAG-7': 'shotgun_nova',
 	'Sawed-Off': 'shotgun_nova',
 
-	'Negev': 'lmg_negev',
-	'M249': 'lmg_negev',
+	Negev: 'lmg_negev',
+	M249: 'lmg_negev',
 
 	'High Explosive Grenade': 'he',
-	'Flashbang': 'flash',
+	Flashbang: 'flash',
 	'Smoke Grenade': 'smoke',
-	'Molotov': 'molotov',
+	Molotov: 'molotov',
 	'Incendiary Grenade': 'incendiary',
 	'Decoy Grenade': 'decoy',
 	'C4 Explosive': 'c4'
@@ -217,7 +220,14 @@ const CODE_TO_ICON: Record<string, WeaponIconKey> = {
 
 function isKnifeName(name: string): boolean {
 	const n = name.toLowerCase()
-	return n === 'knife' || n === 'knife_t' || n.includes('knife') || n.includes('bayonet') || n.includes('karambit') || n.includes('daggers')
+	return (
+		n === 'knife' ||
+		n === 'knife_t' ||
+		n.includes('knife') ||
+		n.includes('bayonet') ||
+		n.includes('karambit') ||
+		n.includes('daggers')
+	)
 }
 
 export function iconForWeapon(name: string): WeaponIconKey | null {

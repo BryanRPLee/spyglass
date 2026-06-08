@@ -21,7 +21,10 @@ const endTick = computed(() => {
 const span = computed(() => Math.max(1, endTick.value - startTick.value))
 
 function pct(tick: number): number {
-	return Math.min(100, Math.max(0, ((tick - startTick.value) / span.value) * 100))
+	return Math.min(
+		100,
+		Math.max(0, ((tick - startTick.value) / span.value) * 100)
+	)
 }
 
 interface KillMarker extends KillEvent {
@@ -52,7 +55,9 @@ const plantedBands = computed<PlantedBand[]>(() => {
 	const bands: PlantedBand[] = []
 	for (const plant of events.filter((b) => b.type === 'planted')) {
 		const resolved = events.find(
-			(b) => b.tick > plant.tick && (b.type === 'defused' || b.type === 'exploded')
+			(b) =>
+				b.tick > plant.tick &&
+				(b.type === 'defused' || b.type === 'exploded')
 		)
 		const bandEnd = resolved?.tick ?? endTick.value
 		const left = pct(plant.tick)
@@ -67,7 +72,8 @@ function killLabel(k: KillEvent): string {
 }
 
 function bombLabel(b: BombEvent): string {
-	if (b.type === 'planted') return `Bomb planted${b.site ? ` — site ${b.site}` : ''}`
+	if (b.type === 'planted')
+		return `Bomb planted${b.site ? ` — site ${b.site}` : ''}`
 	return `Bomb defused${b.site ? ` — site ${b.site}` : ''}`
 }
 </script>
@@ -91,9 +97,15 @@ function bombLabel(b: BombEvent): string {
 				<v-icon
 					:icon="kill.headshot ? 'mdi-skull' : 'mdi-target'"
 					size="14"
-					:color="kill.attackerTeam === 'CT' ? 'blue-lighten-1' : 'orange-lighten-1'"
+					:color="
+						kill.attackerTeam === 'CT'
+							? 'blue-lighten-1'
+							: 'orange-lighten-1'
+					"
 				/>
-				<v-tooltip activator="parent" location="top">{{ killLabel(kill) }}</v-tooltip>
+				<v-tooltip activator="parent" location="top">{{
+					killLabel(kill)
+				}}</v-tooltip>
 			</div>
 
 			<div
@@ -102,9 +114,16 @@ function bombLabel(b: BombEvent): string {
 				class="marker bomb-marker"
 				:style="{ left: `${bomb.left}%` }"
 			>
-				<v-icon v-if="bomb.event.type === 'planted'" icon="mdi-bomb" size="14" color="red-lighten-1" />
+				<v-icon
+					v-if="bomb.event.type === 'planted'"
+					icon="mdi-bomb"
+					size="14"
+					color="red-lighten-1"
+				/>
 				<span v-else class="icon-sprite" :style="defuseKitStyle!" />
-				<v-tooltip activator="parent" location="top">{{ bombLabel(bomb.event) }}</v-tooltip>
+				<v-tooltip activator="parent" location="top">{{
+					bombLabel(bomb.event)
+				}}</v-tooltip>
 			</div>
 		</div>
 	</div>

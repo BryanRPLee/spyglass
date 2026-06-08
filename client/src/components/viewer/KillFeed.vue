@@ -36,9 +36,11 @@ function weaponIconStyle(weapon: string) {
 				:style="weaponIconStyle(kill.weapon)!"
 				:title="kill.weapon"
 			/>
-			<span v-else class="weapon text-caption text-medium-emphasis mx-1">{{
-				kill.weapon
-			}}</span>
+			<span
+				v-else
+				class="weapon text-caption text-medium-emphasis mx-1"
+				>{{ kill.weapon }}</span
+			>
 			<v-icon size="11" color="blue-grey-lighten-2" class="mr-1"
 				>mdi-skull-outline</v-icon
 			>

@@ -13,7 +13,9 @@ const props = defineProps<{ team: 'CT' | 'T' }>()
 const store = usePlaybackStore()
 
 const players = computed<PlayerState[]>(() => {
-	const list = (store.currentFrame?.players ?? []).filter((p) => p.team === props.team)
+	const list = (store.currentFrame?.players ?? []).filter(
+		(p) => p.team === props.team
+	)
 	// Sort by steamId only — a stable key independent of alive/kill state, so
 	// rows don't reorder mid-round when a player dies or scores.
 	return [...list].sort((a, b) => a.steamId.localeCompare(b.steamId))
@@ -21,12 +23,14 @@ const players = computed<PlayerState[]>(() => {
 
 const loadouts = computed<Map<string, InventoryLoadout>>(() => {
 	const map = new Map<string, InventoryLoadout>()
-	for (const p of players.value) map.set(p.steamId, categorizeInventory(p.inventory))
+	for (const p of players.value)
+		map.set(p.steamId, categorizeInventory(p.inventory))
 	return map
 })
 
 const ICON_HEIGHT = 16
-const iconStyle = (key: ReturnType<typeof iconForWeapon>) => spriteStyle(key, ICON_HEIGHT)
+const iconStyle = (key: ReturnType<typeof iconForWeapon>) =>
+	spriteStyle(key, ICON_HEIGHT)
 </script>
 
 <template>
@@ -35,7 +39,10 @@ const iconStyle = (key: ReturnType<typeof iconForWeapon>) => spriteStyle(key, IC
 			{{ team === 'CT' ? 'COUNTER-TERRORISTS' : 'TERRORISTS' }}
 		</div>
 
-		<div v-if="players.length === 0" class="text-caption text-medium-emphasis pa-3">
+		<div
+			v-if="players.length === 0"
+			class="text-caption text-medium-emphasis pa-3"
+		>
 			No data for this side.
 		</div>
 
@@ -47,21 +54,32 @@ const iconStyle = (key: ReturnType<typeof iconForWeapon>) => spriteStyle(key, IC
 		>
 			<div class="d-flex align-center">
 				<span class="hp-track">
-					<span class="hp-fill" :style="{ width: `${p.isAlive ? p.hp : 0}%` }" />
+					<span
+						class="hp-fill"
+						:style="{ width: `${p.isAlive ? p.hp : 0}%` }"
+					/>
 				</span>
 				<span class="player-name text-truncate">{{ p.name }}</span>
-				<v-icon v-if="!p.isAlive" size="12" color="blue-grey-darken-1" class="ml-1"
+				<v-icon
+					v-if="!p.isAlive"
+					size="12"
+					color="blue-grey-darken-1"
+					class="ml-1"
 					>mdi-skull-outline</v-icon
 				>
-				<v-icon v-else-if="p.hasBomb" size="12" color="amber" class="ml-1"
+				<v-icon
+					v-else-if="p.hasBomb"
+					size="12"
+					color="amber"
+					class="ml-1"
 					>mdi-radiobox-marked</v-icon
 				>
 			</div>
 
 			<div class="d-flex align-center justify-space-between mt-1">
 				<span class="kda text-caption">
-					{{ p.kills }}<span class="kda-sep">/</span>{{ p.deaths }}<span class="kda-sep">/</span
-					>{{ p.assists }}
+					{{ p.kills }}<span class="kda-sep">/</span>{{ p.deaths
+					}}<span class="kda-sep">/</span>{{ p.assists }}
 				</span>
 				<div class="d-flex align-center gear-icons">
 					<span
@@ -89,13 +107,21 @@ const iconStyle = (key: ReturnType<typeof iconForWeapon>) => spriteStyle(key, IC
 				<span
 					v-if="loadouts.get(p.steamId)?.primary"
 					class="icon-sprite"
-					:style="iconStyle(iconForWeapon(loadouts.get(p.steamId)!.primary!))"
+					:style="
+						iconStyle(
+							iconForWeapon(loadouts.get(p.steamId)!.primary!)
+						)
+					"
 					:title="loadouts.get(p.steamId)!.primary!"
 				/>
 				<span
 					v-if="loadouts.get(p.steamId)?.secondary"
 					class="icon-sprite"
-					:style="iconStyle(iconForWeapon(loadouts.get(p.steamId)!.secondary!))"
+					:style="
+						iconStyle(
+							iconForWeapon(loadouts.get(p.steamId)!.secondary!)
+						)
+					"
 					:title="loadouts.get(p.steamId)!.secondary!"
 				/>
 				<span

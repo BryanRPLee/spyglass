@@ -120,7 +120,10 @@ async function loadRound(roundId: string) {
 					</div>
 					<MapCanvas />
 
-					<div v-if="store.killsUpToNow.length > 0" class="kill-feed-overlay">
+					<div
+						v-if="store.killsUpToNow.length > 0"
+						class="kill-feed-overlay"
+					>
 						<KillFeed />
 					</div>
 				</div>

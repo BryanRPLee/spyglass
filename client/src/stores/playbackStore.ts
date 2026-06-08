@@ -114,7 +114,8 @@ export const usePlaybackStore = defineStore('playback', () => {
 
 		const msPerTick = 1000 / tickRate.value
 		const preciseTick = tickAtPlayStart + msElapsedSincePlay / msPerTick
-		const lastTick = frames.value[frames.value.length - 1]?.tick ?? preciseTick
+		const lastTick =
+			frames.value[frames.value.length - 1]?.tick ?? preciseTick
 		playbackProgress.value = Math.min(preciseTick, lastTick)
 
 		const targetTick = Math.floor(preciseTick)

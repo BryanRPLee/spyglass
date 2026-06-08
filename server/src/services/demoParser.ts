@@ -28,7 +28,9 @@ function toTeam(num: number): 'CT' | 'T' {
 // position, so we resolve "where the bomb ended up" from that player's last
 // known location at-or-before the event tick (the C4 model lands wherever
 // they were standing/dropped from).
-function buildPositionIndex(rows: any[]): Map<string, { tick: number; x: number; y: number }[]> {
+function buildPositionIndex(
+	rows: any[]
+): Map<string, { tick: number; x: number; y: number }[]> {
 	const index = new Map<string, { tick: number; x: number; y: number }[]>()
 	for (const row of rows) {
 		const steamId = String(row.steamid ?? row.SteamID64 ?? '')
@@ -38,7 +40,11 @@ function buildPositionIndex(rows: any[]): Map<string, { tick: number; x: number;
 			list = []
 			index.set(steamId, list)
 		}
-		list.push({ tick: Number(row.tick), x: Number(row.X ?? 0), y: Number(row.Y ?? 0) })
+		list.push({
+			tick: Number(row.tick),
+			x: Number(row.X ?? 0),
+			y: Number(row.Y ?? 0)
+		})
 	}
 	for (const list of index.values()) list.sort((a, b) => a.tick - b.tick)
 	return index
@@ -146,6 +152,7 @@ export function parseDemo(filePath: string): ParsedDemo {
 			team: toTeam(Number(row.team_num ?? 0)),
 			x: Number(row.X ?? 0),
 			y: Number(row.Y ?? 0),
+			z: Number(row.Z ?? 0),
 			yaw: Number(row.yaw ?? 0),
 			hp: Number(row.health ?? 0),
 			armor: Number(row.armor_value ?? 0),
@@ -218,7 +225,11 @@ export function parseDemo(filePath: string): ParsedDemo {
 			// this also means nothing renders until the grenade is actually thrown.
 			const rawX = g.X ?? g.x
 			const rawY = g.Y ?? g.y
-			if (rawType.includes('Projectile') && rawX != null && rawY != null) {
+			if (
+				rawType.includes('Projectile') &&
+				rawX != null &&
+				rawY != null
+			) {
 				lastX = Number(rawX)
 				lastY = Number(rawY)
 			}
@@ -255,7 +266,8 @@ export function parseDemo(filePath: string): ParsedDemo {
 		// instead, which the HUD already shows correctly.
 		const steamTeam = new Map<string, 'CT' | 'T'>()
 		for (let tick = startTick; tick <= endTick; tick += TICK_STRIDE) {
-			for (const p of tickPlayerMap.get(tick) ?? []) steamTeam.set(p.steamId, p.team)
+			for (const p of tickPlayerMap.get(tick) ?? [])
+				steamTeam.set(p.steamId, p.team)
 		}
 
 		const endEvt = roundEndEvents[i]
@@ -277,7 +289,11 @@ export function parseDemo(filePath: string): ParsedDemo {
 		) {
 			firstSampledTick += TICK_STRIDE
 		}
-		for (let tick = firstSampledTick; tick <= endTick; tick += TICK_STRIDE) {
+		for (
+			let tick = firstSampledTick;
+			tick <= endTick;
+			tick += TICK_STRIDE
+		) {
 			frames.push({
 				tick,
 				players: tickPlayerMap.get(tick) ?? [],
@@ -311,7 +327,11 @@ export function parseDemo(filePath: string): ParsedDemo {
 
 		for (const e of allBombDrops.filter(inRound)) {
 			const tick = Number(e.tick)
-			const pos = positionAt(positionIndex, String(e.user_steamid ?? ''), tick)
+			const pos = positionAt(
+				positionIndex,
+				String(e.user_steamid ?? ''),
+				tick
+			)
 			bombEvents.push({
 				tick,
 				type: 'dropped',
@@ -320,7 +340,11 @@ export function parseDemo(filePath: string): ParsedDemo {
 		}
 		for (const e of allBombPlants.filter(inRound)) {
 			const tick = Number(e.tick)
-			const pos = positionAt(positionIndex, String(e.user_steamid ?? ''), tick)
+			const pos = positionAt(
+				positionIndex,
+				String(e.user_steamid ?? ''),
+				tick
+			)
 			bombEvents.push({
 				tick,
 				type: 'planted',

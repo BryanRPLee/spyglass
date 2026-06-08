@@ -81,7 +81,9 @@ const duration = computed(() => {
 			<!-- Time display -->
 			<div class="time-display text-caption">
 				<span class="text-white">{{ formatTime(elapsed) }}</span>
-				<span class="text-medium-emphasis"> / {{ formatTime(duration) }}</span>
+				<span class="text-medium-emphasis">
+					/ {{ formatTime(duration) }}</span
+				>
 			</div>
 
 			<v-spacer />
@@ -91,7 +93,10 @@ const duration = computed(() => {
 				<button
 					v-for="s in speeds"
 					:key="s"
-					:class="['speed-btn', { active: store.playbackSpeed === s }]"
+					:class="[
+						'speed-btn',
+						{ active: store.playbackSpeed === s }
+					]"
 					@click="store.playbackSpeed = s"
 				>
 					{{ s }}×
@@ -104,7 +109,11 @@ const duration = computed(() => {
 <style scoped>
 .playback-controls {
 	border-top: 1px solid rgba(255, 255, 255, 0.06);
-	background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent);
+	background: linear-gradient(
+		180deg,
+		rgba(255, 255, 255, 0.015),
+		transparent
+	);
 }
 .transport {
 	background: rgba(255, 255, 255, 0.04);

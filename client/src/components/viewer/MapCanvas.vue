@@ -2,8 +2,22 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { usePlaybackStore } from '../../stores/playbackStore.js'
 import { MAP_DATA, worldToCanvas, yawToDirection } from '../../data/maps.js'
-import { ICON_SHEET, ICON_SHEET_SIZE, WEAPON_ICON_RECTS } from '../../data/weaponIcons.js'
-import type { PlayerState, GrenadeState, BombEvent, TickFrame } from '../../types/demo.js'
+import {
+	ICON_SHEET,
+	ICON_SHEET_SIZE,
+	WEAPON_ICON_RECTS
+} from '../../data/weaponIcons.js'
+import {
+	buildWalkabilityGrid,
+	computeMapControl
+} from '../../utils/mapControl.js'
+import type { ControlOwner, ControlSource } from '../../utils/mapControl.js'
+import type {
+	PlayerState,
+	GrenadeState,
+	BombEvent,
+	TickFrame
+} from '../../types/demo.js'
 import type { MapMeta } from '../../data/maps.js'
 
 const store = usePlaybackStore()
@@ -55,7 +69,10 @@ function maxPanOffset(): number {
 
 function clampPan(p: { x: number; y: number }): { x: number; y: number } {
 	const m = maxPanOffset()
-	return { x: Math.min(m, Math.max(-m, p.x)), y: Math.min(m, Math.max(-m, p.y)) }
+	return {
+		x: Math.min(m, Math.max(-m, p.x)),
+		y: Math.min(m, Math.max(-m, p.y))
+	}
 }
 
 // Centers the scale on the canvas midpoint, then offsets by `pan` (in canvas
@@ -134,6 +151,65 @@ onBeforeUnmount(() => {
 let mapImage: HTMLImageElement | null = null
 let mapMeta: MapMeta | null = null
 
+// Map control overlay — see utils/mapControl.ts for the flood-fill behind it.
+// The walkability grid is derived from the radar PNG's alpha channel, so it's
+// rebuilt only when the map image (re)loads, not every frame.
+const showMapControl = ref(false)
+const CONTROL_GRID_SIZE = 96
+let walkabilityGrid: Uint8Array | null = null
+
+function toggleMapControl() {
+	showMapControl.value = !showMapControl.value
+	drawAt(store.playbackProgress)
+}
+
+const CONTROL_COLORS: Record<Exclude<ControlOwner, 0>, string> = {
+	1: 'rgba(33, 150, 243, 0.22)', // CT
+	2: 'rgba(255, 109, 0, 0.22)', // T
+	3: 'rgba(255, 255, 255, 0.08)' // contested
+}
+
+function drawMapControl(
+	ctx: CanvasRenderingContext2D,
+	frame: { players: PlayerState[] },
+	meta: MapMeta
+) {
+	if (!walkabilityGrid) return
+
+	const sources: ControlSource[] = []
+	for (const p of frame.players) {
+		if (!p.isAlive) continue
+		const { x, y } = worldToCanvas(p.x, p.y, meta, CONTROL_GRID_SIZE)
+		const gx = Math.floor(x)
+		const gy = Math.floor(y)
+		if (
+			gx < 0 ||
+			gy < 0 ||
+			gx >= CONTROL_GRID_SIZE ||
+			gy >= CONTROL_GRID_SIZE
+		)
+			continue
+		// Demos parsed before `z` was tracked carry it as undefined, which lerping
+		// turns into NaN — fall back to 0 so the z-gate degrades to "always contest"
+		// (its pre-z behavior) instead of poisoning every comparison with NaN.
+		const z = Number.isFinite(p.z) ? p.z : 0
+		sources.push({ gx, gy, z, team: p.team })
+	}
+	if (sources.length === 0) return
+
+	const owner = computeMapControl(walkabilityGrid, CONTROL_GRID_SIZE, sources)
+	const cell = mapSize.value / CONTROL_GRID_SIZE
+
+	for (let gy = 0; gy < CONTROL_GRID_SIZE; gy++) {
+		for (let gx = 0; gx < CONTROL_GRID_SIZE; gx++) {
+			const o = owner[gy * CONTROL_GRID_SIZE + gx]
+			if (o === 0) continue
+			ctx.fillStyle = CONTROL_COLORS[o]
+			ctx.fillRect(gx * cell, gy * cell, cell + 0.5, cell + 0.5)
+		}
+	}
+}
+
 let bombIcon: HTMLImageElement | null = null
 const bombIconImg = new Image()
 bombIconImg.src = ICON_SHEET
@@ -168,7 +244,9 @@ interface GrenadeEpisode {
 // and look up which run covers the tick being rendered.
 let grenadeEpisodes = new Map<number, GrenadeEpisode[]>()
 
-function buildGrenadeEpisodes(frames: TickFrame[]): Map<number, GrenadeEpisode[]> {
+function buildGrenadeEpisodes(
+	frames: TickFrame[]
+): Map<number, GrenadeEpisode[]> {
 	const episodes = new Map<number, GrenadeEpisode[]>()
 	const active = new Map<number, GrenadeEpisode>()
 
@@ -190,7 +268,11 @@ function buildGrenadeEpisodes(frames: TickFrame[]): Map<number, GrenadeEpisode[]
 				cur.end = frame.tick
 			} else {
 				if (cur) finish(g.entityId, cur)
-				active.set(g.entityId, { type: g.type, start: frame.tick, end: frame.tick })
+				active.set(g.entityId, {
+					type: g.type,
+					start: frame.tick,
+					end: frame.tick
+				})
 			}
 		}
 		for (const [id, ep] of active) {
@@ -235,10 +317,12 @@ watch(
 	(name) => {
 		if (!name) return
 		mapMeta = MAP_DATA[name] ?? null
+		walkabilityGrid = null
 		const img = new Image()
 		img.src = `/maps/${name}.png`
 		img.onload = () => {
 			mapImage = img
+			walkabilityGrid = buildWalkabilityGrid(img, CONTROL_GRID_SIZE)
 			drawAt(store.playbackProgress)
 		}
 		img.onerror = () => {
@@ -292,7 +376,11 @@ function lerpAngle(a: number, b: number, t: number): number {
 	return a + diff * t
 }
 
-function lerpPlayers(a: PlayerState[], b: PlayerState[], t: number): PlayerState[] {
+function lerpPlayers(
+	a: PlayerState[],
+	b: PlayerState[],
+	t: number
+): PlayerState[] {
 	if (t <= 0) return a
 	const byId = new Map(b.map((p) => [p.steamId, p]))
 	return a.map((pa) => {
@@ -302,6 +390,7 @@ function lerpPlayers(a: PlayerState[], b: PlayerState[], t: number): PlayerState
 			...pa,
 			x: pa.x + (pb.x - pa.x) * t,
 			y: pa.y + (pb.y - pa.y) * t,
+			z: pa.z + (pb.z - pa.z) * t,
 			yaw: lerpAngle(pa.yaw, pb.yaw, t)
 		}
 	})
@@ -324,8 +413,13 @@ function frameAt(progress: number): {
 	if (!b) return { tick: a.tick, players: a.players, grenades: a.grenades }
 
 	const span = b.tick - a.tick
-	const t = span > 0 ? Math.min(1, Math.max(0, (progress - a.tick) / span)) : 0
-	return { tick: a.tick, players: lerpPlayers(a.players, b.players, t), grenades: a.grenades }
+	const t =
+		span > 0 ? Math.min(1, Math.max(0, (progress - a.tick) / span)) : 0
+	return {
+		tick: a.tick,
+		players: lerpPlayers(a.players, b.players, t),
+		grenades: a.grenades
+	}
 }
 
 function drawAt(progress: number) {
@@ -366,6 +460,8 @@ function draw(
 	}
 
 	if (mapMeta) {
+		if (showMapControl.value) drawMapControl(ctx, frame, mapMeta)
+
 		for (const g of frame.grenades) drawGrenade(ctx, g, mapMeta, frame.tick)
 
 		for (const p of frame.players) drawPlayer(ctx, p, mapMeta)
@@ -400,14 +496,19 @@ function drawBombState(
 
 	if (event.type === 'planted') {
 		if (event.x == null || event.y == null) return
-		drawBombIcon(ctx, event.x, event.y, meta, frame.tick, { planted: true, site: event.site })
+		drawBombIcon(ctx, event.x, event.y, meta, frame.tick, {
+			planted: true,
+			site: event.site
+		})
 		return
 	}
 
 	// Dropped (and not yet picked back up) — show where it's sitting on the ground.
 	if (event.type === 'dropped' && !carrier) {
 		if (event.x == null || event.y == null) return
-		drawBombIcon(ctx, event.x, event.y, meta, frame.tick, { planted: false })
+		drawBombIcon(ctx, event.x, event.y, meta, frame.tick, {
+			planted: false
+		})
 	}
 }
 
@@ -454,7 +555,9 @@ function drawBombIcon(
 		ctx.fill()
 	}
 
-	const label = opts.planted ? `PLANTED${opts.site ? ` ${opts.site}` : ''}` : 'DROPPED'
+	const label = opts.planted
+		? `PLANTED${opts.site ? ` ${opts.site}` : ''}`
+		: 'DROPPED'
 	ctx.font = "bold 8px 'Courier New', monospace"
 	ctx.textAlign = 'center'
 	ctx.fillStyle = opts.planted ? '#e53935' : '#fdd835'
@@ -542,18 +645,44 @@ function drawDefuseIcon(ctx: CanvasRenderingContext2D, x: number, y: number) {
 	ctx.fill()
 
 	if (bombIcon) {
-		ctx.drawImage(bombIcon, rect.x, rect.y, rect.w, rect.h, x - w / 2, y - H / 2, w, H)
+		ctx.drawImage(
+			bombIcon,
+			rect.x,
+			rect.y,
+			rect.w,
+			rect.h,
+			x - w / 2,
+			y - H / 2,
+			w,
+			H
+		)
 	}
 }
 const GRENADE_COLORS: Record<
 	GrenadeState['type'],
 	{ fill: string; stroke: string; spread: string }
 > = {
-	smoke: { fill: '#9e9e9e', stroke: '#eeeeee', spread: 'rgba(158,158,158,0.16)' },
+	smoke: {
+		fill: '#9e9e9e',
+		stroke: '#eeeeee',
+		spread: 'rgba(158,158,158,0.16)'
+	},
 	he: { fill: '#f44336', stroke: '#ff8a65', spread: 'rgba(244,67,54,0.16)' },
-	molotov: { fill: '#ff6d00', stroke: '#ffcc02', spread: 'rgba(255,109,0,0.18)' },
-	flash: { fill: '#fff9c4', stroke: '#ffffff', spread: 'rgba(255,249,196,0.16)' },
-	decoy: { fill: '#7c4dff', stroke: '#ea80fc', spread: 'rgba(124,77,255,0.16)' }
+	molotov: {
+		fill: '#ff6d00',
+		stroke: '#ffcc02',
+		spread: 'rgba(255,109,0,0.18)'
+	},
+	flash: {
+		fill: '#fff9c4',
+		stroke: '#ffffff',
+		spread: 'rgba(255,249,196,0.16)'
+	},
+	decoy: {
+		fill: '#7c4dff',
+		stroke: '#ea80fc',
+		spread: 'rgba(124,77,255,0.16)'
+	}
 }
 
 function drawGrenade(
@@ -621,8 +750,27 @@ function drawGrenade(
 }
 </script>
 <template>
-	<div ref="wrapRef" class="map-canvas-wrap" @wheel="onWheel" @mousedown="onPanStart">
-		<canvas ref="canvasRef" class="map-canvas" :style="{ cursor: canvasCursor }" />
+	<div
+		ref="wrapRef"
+		class="map-canvas-wrap"
+		@wheel="onWheel"
+		@mousedown="onPanStart"
+	>
+		<canvas
+			ref="canvasRef"
+			class="map-canvas"
+			:style="{ cursor: canvasCursor }"
+		/>
+
+		<div class="layer-controls">
+			<v-btn
+				icon="mdi-checkerboard"
+				size="x-small"
+				variant="flat"
+				:color="showMapControl ? 'primary' : 'rgba(0,0,0,0.5)'"
+				@click="toggleMapControl"
+			/>
+		</div>
 
 		<div class="zoom-controls d-flex flex-column align-center">
 			<v-btn
@@ -632,7 +780,9 @@ function drawGrenade(
 				color="rgba(0,0,0,0.5)"
 				@click="zoomBy(ZOOM_STEP)"
 			/>
-			<span class="zoom-level text-caption">{{ Math.round(zoom * 100) }}%</span>
+			<span class="zoom-level text-caption"
+				>{{ Math.round(zoom * 100) }}%</span
+			>
 			<v-btn
 				icon="mdi-minus"
 				size="x-small"
@@ -669,6 +819,14 @@ function drawGrenade(
 	width: 100%;
 	height: 100%;
 	border-radius: 4px;
+}
+.layer-controls {
+	position: absolute;
+	top: 8px;
+	left: 8px;
+	background: rgba(0, 0, 0, 0.35);
+	border-radius: 8px;
+	padding: 4px;
 }
 .zoom-controls {
 	position: absolute;
