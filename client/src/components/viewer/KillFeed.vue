@@ -1,21 +1,21 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { usePlaybackStore } from '../../stores/playbackStore.js'
+import { iconForWeaponCode, spriteStyle } from '../../data/weaponIcons.js'
 
 const store = usePlaybackStore()
 
+const ICON_HEIGHT = 14
+
 const recentKills = computed(() => [...store.killsUpToNow].reverse())
+
+function weaponIconStyle(weapon: string) {
+	return spriteStyle(iconForWeaponCode(weapon), ICON_HEIGHT)
+}
 </script>
 
 <template>
 	<div class="kill-feed">
-		<div
-			v-if="recentKills.length === 0"
-			class="text-caption text-medium-emphasis pa-3"
-		>
-			No kills yet this round.
-		</div>
-
 		<div
 			v-for="(kill, i) in recentKills"
 			:key="`${kill.tick}-${i}`"
@@ -30,7 +30,13 @@ const recentKills = computed(() => [...store.killsUpToNow].reverse())
 			<v-icon v-if="kill.headshot" size="11" color="amber" class="mx-1"
 				>mdi-target</v-icon
 			>
-			<span class="weapon text-caption text-medium-emphasis mx-1">{{
+			<span
+				v-if="weaponIconStyle(kill.weapon)"
+				class="weapon-icon mx-1"
+				:style="weaponIconStyle(kill.weapon)!"
+				:title="kill.weapon"
+			/>
+			<span v-else class="weapon text-caption text-medium-emphasis mx-1">{{
 				kill.weapon
 			}}</span>
 			<v-icon size="11" color="blue-grey-lighten-2" class="mr-1"
@@ -62,6 +68,12 @@ const recentKills = computed(() => [...store.killsUpToNow].reverse())
 }
 .weapon {
 	white-space: nowrap;
+}
+.weapon-icon {
+	display: inline-block;
+	flex-shrink: 0;
+	filter: brightness(1.6) saturate(0.7);
+	opacity: 0.9;
 }
 .text-ct {
 	color: #82b1ff;

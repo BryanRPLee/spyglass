@@ -8,6 +8,7 @@ import PlaybackControls from '../components/viewer/PlaybackControls.vue'
 import RoundSelector from '../components/viewer/RoundSelector.vue'
 import KillFeed from '../components/viewer/KillFeed.vue'
 import RoundTimer from '../components/viewer/RoundTimer.vue'
+import TeamHud from '../components/viewer/TeamHud.vue'
 import type { DemoSummary } from '../types/demo.js'
 
 const route = useRoute()
@@ -104,6 +105,10 @@ async function loadRound(roundId: string) {
 			</div>
 
 			<div class="viewer-body">
+				<div class="viewer-hud viewer-hud-t">
+					<TeamHud team="T" />
+				</div>
+
 				<div class="viewer-map d-flex align-center justify-center">
 					<div
 						v-if="roundLoading"
@@ -112,15 +117,14 @@ async function loadRound(roundId: string) {
 						<v-progress-circular indeterminate color="primary" />
 					</div>
 					<MapCanvas />
+
+					<div v-if="store.killsUpToNow.length > 0" class="kill-feed-overlay">
+						<KillFeed />
+					</div>
 				</div>
 
-				<div class="viewer-sidebar">
-					<div
-						class="text-caption font-weight-bold text-medium-emphasis px-3 pt-3 pb-1"
-					>
-						KILL FEED
-					</div>
-					<KillFeed />
+				<div class="viewer-hud viewer-hud-ct">
+					<TeamHud team="CT" />
 				</div>
 			</div>
 
@@ -141,7 +145,11 @@ async function loadRound(roundId: string) {
 .viewer-root {
 	display: flex;
 	flex-direction: column;
-	height: 100vh;
+	/* This route always requires auth, so the 52px v-app-bar is always present;
+	   v-main's `min-height: 100vh` stacks on top of its app-bar padding, so we
+	   must subtract that bar height here or the bottom (playback controls)
+	   gets pushed below the fold and the page scrolls. */
+	height: calc(100vh - 52px);
 	overflow: hidden;
 	background: #0d0d1a;
 }
@@ -169,12 +177,29 @@ async function loadRound(roundId: string) {
 	background: rgba(0, 0, 0, 0.55);
 	z-index: 10;
 }
-.viewer-sidebar {
-	width: 240px;
+.kill-feed-overlay {
+	position: absolute;
+	top: 12px;
+	right: 12px;
+	width: 220px;
+	max-height: 45%;
+	overflow-y: auto;
+	background: rgba(18, 18, 42, 0.78);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 6px;
+	backdrop-filter: blur(2px);
+}
+.viewer-hud {
+	width: 200px;
 	flex-shrink: 0;
 	background: #12122a;
-	border-left: 1px solid rgba(255, 255, 255, 0.07);
 	overflow-y: auto;
+}
+.viewer-hud-t {
+	border-right: 1px solid rgba(255, 255, 255, 0.07);
+}
+.viewer-hud-ct {
+	border-left: 1px solid rgba(255, 255, 255, 0.07);
 }
 .viewer-bottom {
 	flex-shrink: 0;

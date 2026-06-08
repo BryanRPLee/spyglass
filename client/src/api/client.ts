@@ -16,7 +16,7 @@ export function useApi() {
 		const headers: Record<string, string> = {
 			...(init.headers as Record<string, string>)
 		}
-		if (!isForm) headers['Content-Type'] = 'application/json'
+		if (init.body && !isForm) headers['Content-Type'] = 'application/json'
 		if (token) headers['Authorization'] = `Bearer ${token}`
 
 		const res = await fetch(`${BASE}${path}`, { ...init, headers })

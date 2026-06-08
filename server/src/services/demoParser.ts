@@ -79,8 +79,14 @@ export function parseDemo(filePath: string): ParsedDemo {
 		'team_num',
 		'is_alive',
 		'armor_value',
-		'active_weapon',
-		'has_c4'
+		'active_weapon_name',
+		'has_c4',
+		'has_helmet',
+		'has_defuser',
+		'inventory',
+		'kills_total',
+		'deaths_total',
+		'assists_total'
 	]) as any[]
 
 	const tickPlayerMap = new Map<number, PlayerState[]>()
@@ -103,25 +109,72 @@ export function parseDemo(filePath: string): ParsedDemo {
 			armor: Number(row.armor_value ?? 0),
 			isAlive: Boolean(row.is_alive),
 			hasBomb: Boolean(row.has_c4),
-			activeWeapon: String(row.active_weapon ?? '')
+			hasHelmet: Boolean(row.has_helmet),
+			hasDefuseKit: Boolean(row.has_defuser),
+			activeWeapon: String(row.active_weapon_name ?? ''),
+			inventory: Array.isArray(row.inventory)
+				? row.inventory.map((w: unknown) => String(w))
+				: [],
+			kills: Number(row.kills_total ?? 0),
+			deaths: Number(row.deaths_total ?? 0),
+			assists: Number(row.assists_total ?? 0)
 		})
 	}
 
-	const grenadeMap = new Map<number, GrenadeState[]>()
+	// Once a grenade lands, demoparser2 keeps emitting rows for it under its
+	// landed entity class (e.g. CIncendiaryGrenade) but stops reporting X/Y —
+	// so we carry the last known in-flight position forward per entity, and
+	// drop any rows seen before a position is known (otherwise they default
+	// to world origin and render as a phantom util in the middle of the map).
+	const grenadeRowsByEntity = new Map<number, any[]>()
 	for (const g of allGrenadeData) {
-		const gType = normalizeGrenadeType(String(g.grenade_type ?? ''))
-		if (!gType) continue
-		const rawTick: number = Number(g.tick ?? 0)
-		const snapped = Math.round(rawTick / TICK_STRIDE) * TICK_STRIDE
-		if (!grenadeMap.has(snapped)) grenadeMap.set(snapped, [])
-		grenadeMap.get(snapped)!.push({
-			entityId: Number(g.entity_id ?? 0),
-			type: gType,
-			x: Number(g.X ?? g.x ?? 0),
-			y: Number(g.Y ?? g.y ?? 0),
-			team: toTeam(Number(g.thrower_team_num ?? 0)),
-			throwerSteamId: String(g.thrower_steamid ?? '')
-		})
+		const id = Number(g.grenade_entity_id ?? 0)
+		let rows = grenadeRowsByEntity.get(id)
+		if (!rows) {
+			rows = []
+			grenadeRowsByEntity.set(id, rows)
+		}
+		rows.push(g)
+	}
+
+	const grenadeMap = new Map<number, GrenadeState[]>()
+	for (const [entityId, rows] of grenadeRowsByEntity) {
+		rows.sort((a, b) => Number(a.tick) - Number(b.tick))
+
+		let lastX: number | null = null
+		let lastY: number | null = null
+
+		for (const g of rows) {
+			const rawType = String(g.grenade_type ?? '')
+			const gType = normalizeGrenadeType(rawType)
+			if (!gType) continue
+
+			// Only "...Projectile" rows are the in-flight entity and carry a
+			// real world position; held-in-inventory rows report the carrying
+			// player's position (which would render the util on the map before
+			// it's even thrown), and landed rows report none. So we seed/advance
+			// lastX/lastY from Projectile rows only, and forward-fill the rest —
+			// this also means nothing renders until the grenade is actually thrown.
+			const rawX = g.X ?? g.x
+			const rawY = g.Y ?? g.y
+			if (rawType.includes('Projectile') && rawX != null && rawY != null) {
+				lastX = Number(rawX)
+				lastY = Number(rawY)
+			}
+			if (lastX === null || lastY === null) continue
+
+			const rawTick: number = Number(g.tick ?? 0)
+			const snapped = Math.round(rawTick / TICK_STRIDE) * TICK_STRIDE
+			if (!grenadeMap.has(snapped)) grenadeMap.set(snapped, [])
+			grenadeMap.get(snapped)!.push({
+				entityId,
+				type: gType,
+				x: lastX,
+				y: lastY,
+				team: toTeam(Number(g.thrower_team_num ?? 0)),
+				throwerSteamId: String(g.thrower_steamid ?? '')
+			})
+		}
 	}
 
 	const endTickList = roundEndEvents.map((e: any) => Number(e.tick))
@@ -135,6 +188,14 @@ export function parseDemo(filePath: string): ParsedDemo {
 			Number(roundStartEvents[i + 1]?.tick ?? playbackTicks)
 
 		if (endTick <= startTick) continue
+
+		// player_death's *_team_num fields have proven unreliable (kills render
+		// as same-team in the feed) — derive team from this round's tick data
+		// instead, which the HUD already shows correctly.
+		const steamTeam = new Map<string, 'CT' | 'T'>()
+		for (let tick = startTick; tick <= endTick; tick += TICK_STRIDE) {
+			for (const p of tickPlayerMap.get(tick) ?? []) steamTeam.set(p.steamId, p.team)
+		}
 
 		const endEvt = roundEndEvents[i]
 		const winnerTeam: 'CT' | 'T' | undefined = endEvt
@@ -161,10 +222,14 @@ export function parseDemo(filePath: string): ParsedDemo {
 				tick: Number(e.tick),
 				attackerName: String(e.attacker_name ?? ''),
 				attackerSteamId: String(e.attacker_steamid ?? ''),
-				attackerTeam: toTeam(Number(e.attacker_team_num ?? 0)),
+				attackerTeam:
+					steamTeam.get(String(e.attacker_steamid ?? '')) ??
+					toTeam(Number(e.attacker_team_num ?? 0)),
 				victimName: String(e.user_name ?? ''),
 				victimSteamId: String(e.user_steamid ?? ''),
-				victimTeam: toTeam(Number(e.user_team_num ?? 0)),
+				victimTeam:
+					steamTeam.get(String(e.user_steamid ?? '')) ??
+					toTeam(Number(e.user_team_num ?? 0)),
 				weapon: String(e.weapon ?? ''),
 				headshot: Boolean(e.headshot)
 			}))

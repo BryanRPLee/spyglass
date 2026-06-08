@@ -32,7 +32,13 @@ export interface PlayerState {
 	armor: number
 	isAlive: boolean
 	hasBomb: boolean
+	hasHelmet: boolean
+	hasDefuseKit: boolean
 	activeWeapon: string
+	inventory: string[]
+	kills: number
+	deaths: number
+	assists: number
 }
 
 export interface GrenadeState {
