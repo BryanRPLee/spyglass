@@ -8,6 +8,7 @@ import PlaybackControls from '../components/viewer/PlaybackControls.vue'
 import RoundSelector from '../components/viewer/RoundSelector.vue'
 import KillFeed from '../components/viewer/KillFeed.vue'
 import RoundTimer from '../components/viewer/RoundTimer.vue'
+import ScoreBoard from '../components/viewer/ScoreBoard.vue'
 import TeamHud from '../components/viewer/TeamHud.vue'
 import type { DemoSummary } from '../types/demo.js'
 
@@ -101,6 +102,7 @@ async function loadRound(roundId: string) {
 				>
 					{{ demo?.mapName }}
 				</v-chip>
+				<ScoreBoard class="mr-4" />
 				<RoundTimer />
 			</div>
 

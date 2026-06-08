@@ -47,8 +47,10 @@ export interface KillEvent {
 
 export interface BombEvent {
 	tick: number
-	type: 'planted' | 'defused' | 'exploded'
+	type: 'dropped' | 'planted' | 'defused' | 'exploded'
 	site?: string
+	x?: number
+	y?: number
 }
 
 export interface RoundEvents {

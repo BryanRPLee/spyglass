@@ -2,7 +2,8 @@
 import { ref, watch, onMounted } from 'vue'
 import { usePlaybackStore } from '../../stores/playbackStore.js'
 import { MAP_DATA, worldToCanvas, yawToDirection } from '../../data/maps.js'
-import type { PlayerState, GrenadeState, TickFrame } from '../../types/demo.js'
+import { ICON_SHEET, ICON_SHEET_SIZE, WEAPON_ICON_RECTS } from '../../data/weaponIcons.js'
+import type { PlayerState, GrenadeState, BombEvent, TickFrame } from '../../types/demo.js'
 import type { MapMeta } from '../../data/maps.js'
 
 const CANVAS_SIZE = 680
@@ -12,6 +13,14 @@ const canvasRef = ref<HTMLCanvasElement | null>(null)
 
 let mapImage: HTMLImageElement | null = null
 let mapMeta: MapMeta | null = null
+
+let bombIcon: HTMLImageElement | null = null
+const bombIconImg = new Image()
+bombIconImg.src = ICON_SHEET
+bombIconImg.onload = () => {
+	bombIcon = bombIconImg
+	drawAt(store.playbackProgress)
+}
 
 // How long a thrown grenade lingers and affects the map, in seconds — used to
 // drive the countdown ring. Grenades without an entry detonate instantly.
@@ -212,6 +221,93 @@ function draw(
 	for (const g of frame.grenades) drawGrenade(ctx, g, mapMeta, frame.tick)
 
 	for (const p of frame.players) drawPlayer(ctx, p, mapMeta)
+
+	drawBombState(ctx, frame, mapMeta)
+}
+
+// Bomb position isn't sampled per-frame — it's reconstructed from the round's
+// event log: the most recent dropped/planted/defused/exploded event at-or-before
+// the current tick tells us whether it's loose on the ground or live at a site
+// (defuse/explosion supersede the plant marker by simply being later events).
+function latestBombEvent(events: BombEvent[], tick: number): BombEvent | null {
+	let latest: BombEvent | null = null
+	for (const e of events) {
+		if (e.tick <= tick && (!latest || e.tick > latest.tick)) latest = e
+	}
+	return latest
+}
+
+function drawBombState(
+	ctx: CanvasRenderingContext2D,
+	frame: { tick: number; players: PlayerState[]; grenades: GrenadeState[] },
+	meta: MapMeta
+) {
+	const event = latestBombEvent(store.events.bombEvents, frame.tick)
+	if (!event) return
+
+	const carrier = frame.players.find((p) => p.isAlive && p.hasBomb)
+
+	if (event.type === 'planted') {
+		if (event.x == null || event.y == null) return
+		drawBombIcon(ctx, event.x, event.y, meta, frame.tick, { planted: true, site: event.site })
+		return
+	}
+
+	// Dropped (and not yet picked back up) — show where it's sitting on the ground.
+	if (event.type === 'dropped' && !carrier) {
+		if (event.x == null || event.y == null) return
+		drawBombIcon(ctx, event.x, event.y, meta, frame.tick, { planted: false })
+	}
+}
+
+function drawBombIcon(
+	ctx: CanvasRenderingContext2D,
+	worldX: number,
+	worldY: number,
+	meta: MapMeta,
+	tick: number,
+	opts: { planted: boolean; site?: string }
+) {
+	const { x, y } = worldToCanvas(worldX, worldY, meta, CANVAS_SIZE)
+	const rect = WEAPON_ICON_RECTS.c4
+	const H = 16
+	const scale = H / rect.h
+	const w = rect.w * scale
+
+	if (opts.planted) {
+		// Pulsing red ring marks a live plant — the thing players most need to spot at a glance.
+		const pulse = (Math.sin(tick / 6) + 1) / 2
+		ctx.beginPath()
+		ctx.arc(x, y, 13 + pulse * 3, 0, Math.PI * 2)
+		ctx.strokeStyle = `rgba(229, 57, 53, ${0.5 + pulse * 0.4})`
+		ctx.lineWidth = 2
+		ctx.stroke()
+	}
+
+	if (bombIcon) {
+		ctx.drawImage(
+			bombIcon,
+			rect.x,
+			rect.y,
+			rect.w,
+			rect.h,
+			x - w / 2,
+			y - H / 2,
+			w,
+			H
+		)
+	} else {
+		ctx.beginPath()
+		ctx.arc(x, y, 5, 0, Math.PI * 2)
+		ctx.fillStyle = '#fdd835'
+		ctx.fill()
+	}
+
+	const label = opts.planted ? `PLANTED${opts.site ? ` ${opts.site}` : ''}` : 'DROPPED'
+	ctx.font = "bold 8px 'Courier New', monospace"
+	ctx.textAlign = 'center'
+	ctx.fillStyle = opts.planted ? '#e53935' : '#fdd835'
+	ctx.fillText(label, x, y + H / 2 + 10)
 }
 
 function drawPlayer(
@@ -295,6 +391,16 @@ function drawGrenade(
 	meta: MapMeta,
 	tick: number
 ) {
+	const duration = GRENADE_DURATIONS[g.type]
+	const episode = findGrenadeEpisode(g.entityId, g.type, tick)
+	if (duration && episode) {
+		const elapsed = (tick - episode.start) / store.tickRate
+		// Parser keeps emitting landed/lingering rows past the util's real
+		// lifetime (e.g. round 16 apartments smokes) — stop drawing once its
+		// timer has actually run out instead of trusting data presence alone.
+		if (elapsed >= duration) return
+	}
+
 	const { x, y } = worldToCanvas(g.x, g.y, meta, CANVAS_SIZE)
 	const { fill, stroke, spread } = GRENADE_COLORS[g.type]
 	const R = g.type === 'smoke' ? 5 : 4
@@ -322,10 +428,7 @@ function drawGrenade(
 	ctx.lineWidth = 1.5
 	ctx.stroke()
 
-	const duration = GRENADE_DURATIONS[g.type]
-	if (!duration) return
-	const episode = findGrenadeEpisode(g.entityId, g.type, tick)
-	if (!episode) return
+	if (!duration || !episode) return
 
 	const elapsed = (tick - episode.start) / store.tickRate
 	const remaining = Math.max(0, duration - elapsed)

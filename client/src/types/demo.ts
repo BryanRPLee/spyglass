@@ -70,8 +70,13 @@ export interface KillEvent {
 
 export interface BombEvent {
 	tick: number
-	type: 'planted' | 'defused' | 'exploded'
+	type: 'dropped' | 'planted' | 'defused' | 'exploded'
 	site?: string
+	// World position where the bomb came to rest — derived from the carrying
+	// player's location at the moment of the event (dropped/planted only;
+	// defuse/explosion resolve in place so they don't need their own).
+	x?: number
+	y?: number
 }
 
 export interface RoundEvents {

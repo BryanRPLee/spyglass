@@ -24,6 +24,41 @@ function toTeam(num: number): 'CT' | 'T' {
 	return num === TEAM_CT ? 'CT' : 'T'
 }
 
+// bomb_dropped/bomb_planted carry the player's steamid but not a world
+// position, so we resolve "where the bomb ended up" from that player's last
+// known location at-or-before the event tick (the C4 model lands wherever
+// they were standing/dropped from).
+function buildPositionIndex(rows: any[]): Map<string, { tick: number; x: number; y: number }[]> {
+	const index = new Map<string, { tick: number; x: number; y: number }[]>()
+	for (const row of rows) {
+		const steamId = String(row.steamid ?? row.SteamID64 ?? '')
+		if (!steamId || steamId === '0') continue
+		let list = index.get(steamId)
+		if (!list) {
+			list = []
+			index.set(steamId, list)
+		}
+		list.push({ tick: Number(row.tick), x: Number(row.X ?? 0), y: Number(row.Y ?? 0) })
+	}
+	for (const list of index.values()) list.sort((a, b) => a.tick - b.tick)
+	return index
+}
+
+function positionAt(
+	index: Map<string, { tick: number; x: number; y: number }[]>,
+	steamId: string,
+	tick: number
+): { x: number; y: number } | null {
+	const list = index.get(steamId)
+	if (!list || list.length === 0) return null
+	let result = list[0]
+	for (const entry of list) {
+		if (entry.tick > tick) break
+		result = entry
+	}
+	return { x: result.x, y: result.y }
+}
+
 function normalizeGrenadeType(raw: string): GrenadeState['type'] | null {
 	const t = (raw ?? '').toLowerCase()
 	if (t.includes('smoke')) return 'smoke'
@@ -58,8 +93,12 @@ export function parseDemo(filePath: string): ParsedDemo {
 		'headshot'
 	]) as any[]
 
+	const allBombDrops = parseEvent(filePath, 'bomb_dropped', [
+		'user_steamid'
+	]) as any[]
 	const allBombPlants = parseEvent(filePath, 'bomb_planted', [
-		'site'
+		'site',
+		'user_steamid'
 	]) as any[]
 	const allBombDefuses = parseEvent(filePath, 'bomb_defused', [
 		'site'
@@ -88,6 +127,8 @@ export function parseDemo(filePath: string): ParsedDemo {
 		'deaths_total',
 		'assists_total'
 	]) as any[]
+
+	const positionIndex = buildPositionIndex(allPlayerTicks)
 
 	const tickPlayerMap = new Map<number, PlayerState[]>()
 	for (const row of allPlayerTicks) {
@@ -137,17 +178,35 @@ export function parseDemo(filePath: string): ParsedDemo {
 		rows.push(g)
 	}
 
+	// A physical throw's rows arrive on consecutive sampled ticks; a gap this
+	// large between rows for the same entity id means the engine recycled the
+	// id for an unrelated later throw, not that the same util kept existing.
+	const GRENADE_EPISODE_GAP_TICKS = tickRate
+
 	const grenadeMap = new Map<number, GrenadeState[]>()
 	for (const [entityId, rows] of grenadeRowsByEntity) {
 		rows.sort((a, b) => Number(a.tick) - Number(b.tick))
 
 		let lastX: number | null = null
 		let lastY: number | null = null
+		let lastRowTick: number | null = null
 
 		for (const g of rows) {
 			const rawType = String(g.grenade_type ?? '')
 			const gType = normalizeGrenadeType(rawType)
 			if (!gType) continue
+
+			const rawTickForGap: number = Number(g.tick ?? 0)
+			if (
+				lastRowTick !== null &&
+				rawTickForGap - lastRowTick > GRENADE_EPISODE_GAP_TICKS
+			) {
+				// Recycled entity id starting a brand new throw — drop the stale
+				// position so it can't bleed into this throw's pre-Projectile rows.
+				lastX = null
+				lastY = null
+			}
+			lastRowTick = rawTickForGap
 
 			// Only "...Projectile" rows are the in-flight entity and carry a
 			// real world position; held-in-inventory rows report the carrying
@@ -205,7 +264,17 @@ export function parseDemo(filePath: string): ParsedDemo {
 			endEvt?.reason != null ? String(endEvt.reason) : undefined
 
 		const frames: TickFrame[] = []
-		const firstSampledTick = Math.ceil(startTick / TICK_STRIDE) * TICK_STRIDE
+		// round_start can land a few ticks ahead of the first sampled tick that
+		// actually carries player data (recording gaps at round transitions) —
+		// walk forward to the first stride-aligned tick the tick map has, so we
+		// don't emit leading frames with an empty players[] (round 7/13 had this).
+		let firstSampledTick = Math.ceil(startTick / TICK_STRIDE) * TICK_STRIDE
+		while (
+			firstSampledTick <= endTick &&
+			!tickPlayerMap.has(firstSampledTick)
+		) {
+			firstSampledTick += TICK_STRIDE
+		}
 		for (let tick = firstSampledTick; tick <= endTick; tick += TICK_STRIDE) {
 			frames.push({
 				tick,
@@ -238,11 +307,23 @@ export function parseDemo(filePath: string): ParsedDemo {
 		const inRound = (e: any) =>
 			Number(e.tick) >= startTick && Number(e.tick) <= endTick
 
-		for (const e of allBombPlants.filter(inRound)) {
+		for (const e of allBombDrops.filter(inRound)) {
+			const tick = Number(e.tick)
+			const pos = positionAt(positionIndex, String(e.user_steamid ?? ''), tick)
 			bombEvents.push({
-				tick: Number(e.tick),
+				tick,
+				type: 'dropped',
+				...(pos ? { x: pos.x, y: pos.y } : {})
+			})
+		}
+		for (const e of allBombPlants.filter(inRound)) {
+			const tick = Number(e.tick)
+			const pos = positionAt(positionIndex, String(e.user_steamid ?? ''), tick)
+			bombEvents.push({
+				tick,
 				type: 'planted',
-				site: String(e.site ?? '')
+				site: String(e.site ?? ''),
+				...(pos ? { x: pos.x, y: pos.y } : {})
 			})
 		}
 		for (const e of allBombDefuses.filter(inRound)) {
